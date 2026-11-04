@@ -9,8 +9,23 @@ Windows 向けのオートクリッカーです。C++ と Win32 API だけで書
 
 ## ダウンロード
 
-GitHub の **Actions** タブ → 最新の「Build」ワークフロー → **Artifacts** の `AutoClicker-windows-x64` から exe を取得できます。
-`v1.0.0` のようなタグを push すると、**Releases** にも exe が自動で添付されます。
+**[Releases（最新版）](https://github.com/ais1204/Auto-Progress/releases/latest)** の Assets にある `AutoClicker.exe` をダウンロードして実行してください（インストール不要）。
+
+初回起動時に「Windows によって PC が保護されました」と表示された場合は、「詳細情報」→「実行」を選ぶと起動できます（コード署名をしていないため表示されます）。
+
+開発中の最新ビルドは、GitHub の **Actions** タブ → 「Build」ワークフロー → **Artifacts** の `AutoClicker-windows-x64` からも取得できます。
+
+### 新しいバージョンを公開する（開発者向け）
+
+`src/resource.h` と `src/app.cpp` のバージョン番号を更新してコミットし、`v` から始まるタグを push すると、GitHub Actions がビルドしてリリースに exe を添付します。
+
+```bash
+git tag v1.0.1
+```
+
+```bash
+git push origin v1.0.1
+```
 
 ## 機能
 
