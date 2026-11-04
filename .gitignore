@@ -1,0 +1,18 @@
+# ビルド出力
+build/
+build-*/
+out/
+cmake-build-*/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.user
+CMakeSettings.json
+CMakeUserPresets.json
+
+# 実行時に作られるファイル
+AutoClicker.ini
+last_macro.acm
+*.write-test
