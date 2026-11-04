@@ -39,6 +39,7 @@ struct Config {
 
     // 共通
     bool topmost = false;
+    bool compact = false;  // コンパクト表示
     int startDelaySec = 0;
     bool cornerStop = true;
     bool sound = false;

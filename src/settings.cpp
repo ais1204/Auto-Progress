@@ -95,6 +95,7 @@ void Load(Config& c) {
     c.editDelayMs = ReadInt(L"Macro", L"EditDelay", c.editDelayMs, 0, kMax);
 
     c.topmost = ReadBool(L"General", L"Topmost", c.topmost);
+    c.compact = ReadBool(L"General", L"Compact", c.compact);
     c.startDelaySec = ReadInt(L"General", L"StartDelay", c.startDelaySec, 0, 3600);
     c.cornerStop = ReadBool(L"General", L"CornerStop", c.cornerStop);
     c.sound = ReadBool(L"General", L"Sound", c.sound);
@@ -136,6 +137,7 @@ void Save(const Config& c) {
     WriteInt(L"Macro", L"EditDelay", c.editDelayMs);
 
     WriteInt(L"General", L"Topmost", c.topmost);
+    WriteInt(L"General", L"Compact", c.compact);
     WriteInt(L"General", L"StartDelay", c.startDelaySec);
     WriteInt(L"General", L"CornerStop", c.cornerStop);
     WriteInt(L"General", L"Sound", c.sound);

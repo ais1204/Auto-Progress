@@ -30,7 +30,7 @@ constexpr wchar_t kPageClassName[] = L"AutoProgress.AutoClicker.Page";
 constexpr wchar_t kShowMessageName[] = L"AutoProgress.AutoClicker.Show";
 constexpr wchar_t kMutexName[] = L"Local\\AutoProgress.AutoClicker";
 constexpr wchar_t kAppTitle[] = L"オートクリッカー";
-constexpr wchar_t kVersion[] = L"1.0.0";
+constexpr wchar_t kVersion[] = L"1.1.0";
 
 constexpr UINT WM_APP_TRAY = WM_APP + 10;
 constexpr UINT WM_APP_STARTUP = WM_APP + 11;
@@ -44,13 +44,25 @@ constexpr size_t kUndoLimit = 30;
 constexpr int kClientWidth = 480;
 constexpr int kClientHeight = 556;  // ステータスバーを除く
 constexpr int kTabX = 8, kTabY = 8, kTabW = 464, kTabH = 514;
+// コンパクト表示時のクライアント領域（ステータスバーを除く）
+constexpr int kCompactWidth = 368;
+constexpr int kCompactHeight = 74;
+constexpr UINT kSysMenuCompact = 0x0110;  // システムメニューに追加する項目（下位 4 ビットは 0）
 
-enum Page : int { kPageClicker = 0, kPageMacro = 1, kPageSettings = 2, kPageCount = 3, kPageMain = -1 };
+enum Page : int {
+    kPageClicker = 0,
+    kPageMacro = 1,
+    kPageSettings = 2,
+    kPageCount = 3,    // タブのページ数
+    kPageCompact = 3,  // コンパクト表示用のコンテナー（タブには含まない）
+    kPageMain = -1,
+};
 
 enum ControlId : int {
     IDC_TAB = 100,
     IDC_STATUS,
     IDC_TOPMOST,
+    IDC_COMPACT,
 
     IDC_C_INTERVAL = 200,
     IDC_C_UNIT,
@@ -108,10 +120,17 @@ enum ControlId : int {
     IDC_S_INFO,
     IDC_S_OPEN_FOLDER,
 
+    IDC_K_CLICKER = 500,
+    IDC_K_PLAY,
+    IDC_K_RECORD,
+    IDC_K_TOPMOST,
+    IDC_K_EXPAND,
+
     IDM_TRAY_SHOW = 900,
     IDM_TRAY_CLICKER,
     IDM_TRAY_PLAY,
     IDM_TRAY_EXIT,
+    IDM_TRAY_COMPACT,
 };
 
 // ---------------------------------------------------------------------------
@@ -130,7 +149,7 @@ struct App {
     HWND tab = nullptr;
     HWND status = nullptr;
     HWND list = nullptr;
-    HWND pages[kPageCount] = {};
+    HWND pages[kPageCount + 1] = {};
     HFONT font = nullptr;
     HFONT bigFont = nullptr;
     HICON iconBig = nullptr;
@@ -140,6 +159,7 @@ struct App {
     std::vector<Control> controls;
     std::unordered_map<int, HWND> byId;
     int page = kPageClicker;
+    bool compact = false;  // コンパクト表示中
 
     Config cfg;
     Clicker clicker;
@@ -464,6 +484,7 @@ void LoadControlsFromConfig() {
     SetInt(IDC_M_LOOPDELAY, c.loopDelayMs);
 
     SetCheck(IDC_TOPMOST, c.topmost);
+    SetCheck(IDC_K_TOPMOST, c.topmost);
     SetInt(IDC_S_START_DELAY, c.startDelaySec);
     SetCheck(IDC_S_CORNER, c.cornerStop);
     SetCheck(IDC_S_SOUND, c.sound);
@@ -498,6 +519,7 @@ void SyncConfigFromControls() {
     c.loopDelayMs = GetInt(IDC_M_LOOPDELAY, c.loopDelayMs, 0, kMaxMs);
 
     c.topmost = IsChecked(IDC_TOPMOST);
+    c.compact = g.compact;
     c.startDelaySec = GetInt(IDC_S_START_DELAY, c.startDelaySec, 0, 3600);
     c.cornerStop = IsChecked(IDC_S_CORNER);
     c.sound = IsChecked(IDC_S_SOUND);
@@ -531,6 +553,9 @@ void UpdateHotkeyTexts() {
     SetText(IDC_C_STOP, L"■ 停止" + HotkeySuffix(kHotkeyClicker));
     SetText(IDC_M_RECORD, (recorder::IsRecording() ? L"■ 記録停止" : L"● 記録開始") + HotkeySuffix(kHotkeyRecord));
     SetText(IDC_M_PLAY, L"▶ 再生" + HotkeySuffix(kHotkeyPlay));
+    SetText(IDC_K_CLICKER, (g.clicker.Running() ? L"■ 停止" : L"▶ 連打") + HotkeySuffix(kHotkeyClicker));
+    SetText(IDC_K_PLAY, (g.player.Running() ? L"■ 停止" : L"▶ 再生") + HotkeySuffix(kHotkeyPlay));
+    SetText(IDC_K_RECORD, (recorder::IsRecording() ? L"■ 停止" : L"● 記録") + HotkeySuffix(kHotkeyRecord));
     SetText(IDC_M_STOP, L"■ 停止" + HotkeySuffix(kHotkeyPlay));
     SetText(IDC_M_ADD, g.cfg.hotkeys[kHotkeyAddPoint].vk ? L"追加 [" + HotkeyText(g.cfg.hotkeys[kHotkeyAddPoint]) + L"]" : L"追加");
 
@@ -1018,12 +1043,15 @@ void EnsureFocus() {
     if (!foreground && usable(g.lastFocus)) return;
 
     HWND preferred = g.tab;
-    if (g.page == kPageClicker) {
+    if (g.compact) {
+        preferred = Ctl(g.player.Running() ? IDC_K_PLAY : (recorder::IsRecording() ? IDC_K_RECORD : IDC_K_CLICKER));
+        if (!usable(preferred)) preferred = Ctl(IDC_K_EXPAND);
+    } else if (g.page == kPageClicker) {
         preferred = Ctl(g.clicker.Running() ? IDC_C_STOP : IDC_C_START);
     } else if (g.page == kPageMacro) {
         preferred = Ctl(g.player.Running() ? IDC_M_STOP : (recorder::IsRecording() ? IDC_M_RECORD : IDC_M_PLAY));
     }
-    if (!usable(preferred)) preferred = g.tab;
+    if (!usable(preferred)) preferred = g.compact ? Ctl(IDC_K_EXPAND) : g.tab;
     if (foreground) SetFocus(preferred);
     else g.lastFocus = preferred;
 }
@@ -1114,6 +1142,9 @@ void UpdateUi() {
     Enable(IDC_M_RECORD, recording || !busy);
     Enable(IDC_M_PLAY, !busy);
     Enable(IDC_M_STOP, playing);
+    Enable(IDC_K_CLICKER, clicking || !busy);
+    Enable(IDC_K_PLAY, playing || !busy);
+    Enable(IDC_K_RECORD, recording || !busy);
     UpdateHotkeyTexts();
     UpdateClickerEnables();
     UpdateEditorEnables();
@@ -1127,10 +1158,52 @@ void ShowPage(int page) {
     g.page = page;
     if (TabCtrl_GetCurSel(g.tab) != page) TabCtrl_SetCurSel(g.tab, page);
     for (int i = 0; i < kPageCount; ++i) {
-        if (i != page) ShowWindow(g.pages[i], SW_HIDE);
+        if (i != page || g.compact) ShowWindow(g.pages[i], SW_HIDE);
     }
-    ShowWindow(g.pages[page], SW_SHOW);
+    if (!g.compact) ShowWindow(g.pages[page], SW_SHOW);
     EnsureFocus();
+}
+
+void Layout();
+
+// ウィンドウが作業領域（タスクバーを除く画面）からはみ出していたら押し戻す
+void EnsureOnScreen() {
+    RECT r{};
+    GetWindowRect(g.hwnd, &r);
+    MONITORINFO mi{};
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(MonitorFromWindow(g.hwnd, MONITOR_DEFAULTTONEAREST), &mi)) return;
+    const RECT& work = mi.rcWork;
+    int x = r.left, y = r.top;
+    if (r.right > work.right) x -= r.right - work.right;
+    if (r.bottom > work.bottom) y -= r.bottom - work.bottom;
+    if (x < work.left) x = work.left;
+    if (y < work.top) y = work.top;
+    if (x != r.left || y != r.top) SetWindowPos(g.hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+// 通常表示 / コンパクト表示に合わせてコントロールの表示とウィンドウの大きさを切り替える
+void ApplyView() {
+    const int show = g.compact ? SW_HIDE : SW_SHOW;
+    ShowWindow(g.tab, show);
+    ShowWindow(Ctl(IDC_TOPMOST), show);
+    ShowWindow(Ctl(IDC_COMPACT), show);
+    ShowWindow(g.pages[kPageCompact], g.compact ? SW_SHOW : SW_HIDE);
+    ShowPage(g.page);
+    Layout();
+    if (HMENU sys = GetSystemMenu(g.hwnd, FALSE)) {
+        CheckMenuItem(sys, kSysMenuCompact, MF_BYCOMMAND | (g.compact ? MF_CHECKED : MF_UNCHECKED));
+    }
+    InvalidateRect(g.hwnd, nullptr, TRUE);
+}
+
+void SetCompact(bool compact) {
+    if (g.compact == compact) return;
+    g.compact = compact;
+    g.cfg.compact = compact;
+    ApplyView();
+    EnsureOnScreen();
+    UpdateUi();
 }
 
 // ---------------------------------------------------------------------------
@@ -1174,6 +1247,8 @@ void ShowTrayMenu() {
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_TRAY_CLICKER, g.clicker.Running() ? L"連打を停止" : L"連打を開始");
     AppendMenuW(menu, MF_STRING, IDM_TRAY_PLAY, g.player.Running() ? L"再生を停止" : L"マクロを再生");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING | (g.compact ? MF_CHECKED : MF_UNCHECKED), IDM_TRAY_COMPACT, L"コンパクト表示");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_TRAY_EXIT, L"終了");
     SetMenuDefaultItem(menu, IDM_TRAY_SHOW, FALSE);
@@ -1326,8 +1401,18 @@ void CreateSettingsPage() {
     Button(P, IDC_S_OPEN_FOLDER, L"フォルダーを開く", 332, 389, 108, 26);
     MultiLabel(P,
                L"キーボード操作: Tab で項目移動 / Space・Enter で押す / Ctrl+Tab でタブ切替 / "
-               L"Ctrl+S 保存 / Ctrl+O 開く / Ctrl+Z 元に戻す / Delete でステップ削除",
-               20, 422, 416, 44);
+               L"Ctrl+S 保存 / Ctrl+O 開く / Ctrl+Z 元に戻す / Ctrl+M コンパクト表示 / Delete でステップ削除",
+               20, 420, 416, 48);
+}
+
+// コンパクト表示: よく使う操作だけを並べた小さな操作パネル
+void CreateCompactPage() {
+    const int P = kPageCompact;
+    Button(P, IDC_K_CLICKER, L"▶ 連打", 6, 6, 116, 34);
+    Button(P, IDC_K_PLAY, L"▶ 再生", 126, 6, 116, 34);
+    Button(P, IDC_K_RECORD, L"● 記録", 246, 6, 116, 34);
+    Check(P, IDC_K_TOPMOST, L"常に最前面に表示", 8, 46, 180, 24);
+    Button(P, IDC_K_EXPAND, L"通常表示に戻す", 246, 45, 116, 26);
 }
 
 LRESULT CALLBACK PageProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
@@ -1365,11 +1450,15 @@ void CreateControls() {
         g.pages[i] = CreateWindowExW(WS_EX_CONTROLPARENT, kPageClassName, L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 0, 0,
                                      g.hwnd, nullptr, g.inst, nullptr);
     }
-    Check(kPageMain, IDC_TOPMOST, L"常に最前面に表示", 14, 528, 240, 22);
+    g.pages[kPageCompact] = CreateWindowExW(WS_EX_CONTROLPARENT, kPageClassName, L"", WS_CHILD | WS_CLIPSIBLINGS, 0, 0,
+                                            0, 0, g.hwnd, nullptr, g.inst, nullptr);
+    Check(kPageMain, IDC_TOPMOST, L"常に最前面に表示", 14, 528, 220, 22);
+    Button(kPageMain, IDC_COMPACT, L"コンパクト表示", 346, 525, 126, 27);
 
     CreateClickerPage();
     CreateMacroPage();
     CreateSettingsPage();
+    CreateCompactPage();
 
     g.status = CreateWindowExW(0, STATUSCLASSNAMEW, L"", WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, g.hwnd,
                                reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_STATUS)), g.inst, nullptr);
@@ -1390,10 +1479,12 @@ void Layout() {
     SetWindowPos(g.tab, nullptr, S(kTabX), S(kTabY), S(kTabW), S(kTabH), SWP_NOZORDER | SWP_NOACTIVATE);
     RECT display{0, 0, S(kTabW), S(kTabH)};
     TabCtrl_AdjustRect(g.tab, FALSE, &display);
-    for (HWND page : g.pages) {
-        SetWindowPos(page, nullptr, S(kTabX) + display.left, S(kTabY) + display.top, display.right - display.left,
-                     display.bottom - display.top, SWP_NOZORDER | SWP_NOACTIVATE);
+    for (int i = 0; i < kPageCount; ++i) {
+        SetWindowPos(g.pages[i], nullptr, S(kTabX) + display.left, S(kTabY) + display.top,
+                     display.right - display.left, display.bottom - display.top, SWP_NOZORDER | SWP_NOACTIVATE);
     }
+    SetWindowPos(g.pages[kPageCompact], nullptr, 0, 0, S(kCompactWidth), S(kCompactHeight),
+                 SWP_NOZORDER | SWP_NOACTIVATE);
 
     for (const Control& c : g.controls) {
         if (c.hwnd == g.tab) continue;
@@ -1408,10 +1499,12 @@ void Layout() {
     RECT sr{};
     GetWindowRect(g.status, &sr);
     const int statusHeight = sr.bottom - sr.top;
-    int parts[2] = {S(kClientWidth - 130), -1};
+    const int clientWidth = g.compact ? kCompactWidth : kClientWidth;
+    const int clientHeight = g.compact ? kCompactHeight : kClientHeight;
+    int parts[2] = {S(clientWidth - (g.compact ? 104 : 130)), -1};
     SendMessageW(g.status, SB_SETPARTS, 2, reinterpret_cast<LPARAM>(parts));
 
-    RECT rc{0, 0, S(kClientWidth), S(kClientHeight) + statusHeight};
+    RECT rc{0, 0, S(clientWidth), S(clientHeight) + statusHeight};
     AdjustRectForDpi(&rc, static_cast<DWORD>(GetWindowLongPtrW(g.hwnd, GWL_STYLE)),
                      static_cast<DWORD>(GetWindowLongPtrW(g.hwnd, GWL_EXSTYLE)), g.dpi);
     SetWindowPos(g.hwnd, nullptr, 0, 0, rc.right - rc.left, rc.bottom - rc.top,
@@ -1449,8 +1542,28 @@ void OnCommand(int id, int code) {
             break;
 
         case IDC_TOPMOST:
-            g.cfg.topmost = IsChecked(IDC_TOPMOST);
+        case IDC_K_TOPMOST:
+            g.cfg.topmost = IsChecked(id);
+            SetCheck(IDC_TOPMOST, g.cfg.topmost);
+            SetCheck(IDC_K_TOPMOST, g.cfg.topmost);
             ApplyTopmost();
+            break;
+        case IDC_COMPACT:
+            SetCompact(true);
+            break;
+
+        // コンパクト表示
+        case IDC_K_CLICKER:
+            ToggleClicker();
+            break;
+        case IDC_K_PLAY:
+            TogglePlay();
+            break;
+        case IDC_K_RECORD:
+            ToggleRecord();
+            break;
+        case IDC_K_EXPAND:
+            SetCompact(false);
             break;
 
         // 連打
@@ -1566,6 +1679,10 @@ void OnCommand(int id, int code) {
         case IDM_TRAY_PLAY:
             TogglePlay();
             break;
+        case IDM_TRAY_COMPACT:
+            SetCompact(!g.compact);
+            RestoreWindow();
+            break;
         case IDM_TRAY_EXIT:
             SendMessageW(g.hwnd, WM_CLOSE, 0, 0);
             break;
@@ -1651,9 +1768,14 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             CreateControls();
             ApplyFonts();
             LoadControlsFromConfig();
-            Layout();
+            if (HMENU sys = GetSystemMenu(hwnd, FALSE)) {
+                AppendMenuW(sys, MF_SEPARATOR, 0, nullptr);
+                AppendMenuW(sys, MF_STRING, kSysMenuCompact, L"コンパクト表示\tCtrl+M");
+            }
             RefreshList();
-            ShowPage(g.cfg.tab);
+            g.page = g.cfg.tab;
+            g.compact = g.cfg.compact;
+            ApplyView();
             ApplyTopmost();
             SetTimer(hwnd, kStatusTimer, 100, nullptr);
             PostMessageW(hwnd, WM_APP_STARTUP, 0, 0);
@@ -1681,6 +1803,12 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             Layout();
             return 0;
         }
+        case WM_SYSCOMMAND:
+            if ((wp & 0xFFF0) == kSysMenuCompact) {
+                SetCompact(!g.compact);
+                return 0;
+            }
+            break;
         case WM_ACTIVATE:
             if (LOWORD(wp) == WA_INACTIVE) {
                 HWND f = GetFocus();
@@ -1797,6 +1925,18 @@ bool HandleShortcut(const MSG& msg) {
     if (IsClass(focus, HOTKEY_CLASSW)) return false;  // ホットキーの入力中はそのまま渡す
 
     const bool shift = GetKeyState(VK_SHIFT) < 0;
+    switch (msg.wParam) {
+        case 'M':
+            SetCompact(!g.compact);
+            return true;
+        case VK_TAB:
+        case VK_NEXT:
+        case VK_PRIOR:
+            if (g.compact) return true;  // コンパクト表示中はタブがない
+            break;
+        default:
+            break;
+    }
     switch (msg.wParam) {
         case VK_TAB:
             ShowPage((g.page + (shift ? kPageCount - 1 : 1)) % kPageCount);

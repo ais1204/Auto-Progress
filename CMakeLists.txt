@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(AutoClicker VERSION 1.0.0 LANGUAGES CXX RC)
+project(AutoClicker VERSION 1.1.0 LANGUAGES CXX RC)
 
 if(NOT WIN32)
   message(FATAL_ERROR "AutoClicker is a Windows application. Use MSVC, MinGW-w64, or cmake/mingw-w64-x86_64.cmake to cross-compile.")
