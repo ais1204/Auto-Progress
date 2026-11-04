@@ -17,7 +17,10 @@ Windows 向けのオートクリッカーです。C++ と Win32 API だけで書
 
 ### 新しいバージョンを公開する（開発者向け）
 
-`src/resource.h` と `src/app.cpp` のバージョン番号を更新してコミットし、`v` から始まるタグを push すると、GitHub Actions がビルドしてリリースに exe を添付します。
+`src/resource.h` と `src/app.cpp` のバージョン番号を更新してコミットしたあと、次のどちらかでリリースを作成できます。GitHub Actions がビルドし、リリースに exe を添付します。
+
+- **ブラウザーから**: GitHub の **Actions** タブ → 左の「Build」→ 右上の **Run workflow** → `release_tag` に `v1.0.1` のようなバージョンを入力して実行
+- **コマンドから**: `v` で始まるタグを push
 
 ```bash
 git tag v1.0.1
